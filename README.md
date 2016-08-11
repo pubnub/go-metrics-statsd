@@ -1,5 +1,5 @@
 ## Intro
-This library is based on the cyberdelia[graphite library](https://github.com/cyberdelia/go-metrics-graphite) just modifying the wireformat for statsd
+This library is based on the cyberdelia [graphite library](https://github.com/cyberdelia/go-metrics-graphite) just modifying the wireformat for statsd
 
 This is a reporter for the [go-metrics](https://github.com/rcrowley/go-metrics)
 library which will post the metrics to Statsd. It was originally part of the
