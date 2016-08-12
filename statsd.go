@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -15,7 +16,7 @@ import (
 // StatsDConfig provides a container with
 // configuration parameters for the StatsD exporter
 type StatsDConfig struct {
-	Addr          *net.TCPAddr     // Network address to connect to
+	Addr          *net.UDPAddr     // Network address to connect to
 	Registry      metrics.Registry // Registry to be exported
 	FlushInterval time.Duration    // Flush interval
 	DurationUnit  time.Duration    // Time conversion unit for durations
@@ -26,7 +27,7 @@ type StatsDConfig struct {
 // StatsD is a blocking exporter function which reports metrics in r
 // to a statsd server located at addr, flushing them every d duration
 // and prepending metric names with prefix.
-func StatsD(r metrics.Registry, d time.Duration, prefix string, addr *net.TCPAddr) {
+func StatsD(r metrics.Registry, d time.Duration, prefix string, addr *net.UDPAddr) {
 	StatsDWithConfig(StatsDConfig{
 		Addr:          addr,
 		Registry:      r,
@@ -50,7 +51,7 @@ func StatsDWithConfig(c StatsDConfig) {
 func statsd(c *StatsDConfig) error {
 	du := float64(c.DurationUnit)
 
-	conn, err := net.DialTCP("tcp", nil, c.Addr)
+	conn, err := net.DialUDP("udp", nil, c.Addr)
 
 	if nil != err {
 		return err
@@ -63,16 +64,16 @@ func statsd(c *StatsDConfig) error {
 	w := bufio.NewWriter(conn)
 
 	// for each metric in the registry format into statsd wireformat and send
-	c.Registry.Each(func(name string, i interface{}) {
-		switch metric := i.(type) {
+	c.Registry.Each(func(name string, metric interface{}) {
+		switch m := metric.(type) {
 		case metrics.Counter:
-			fmt.Fprintf(w, "%s--%s.count:%d|c\n", c.Prefix, name, metric.Count())
+			fmt.Fprintf(w, "%s--%s.count:%d|c\n", c.Prefix, name, m.Count())
 		case metrics.Gauge:
-			fmt.Fprintf(w, "%s--%s.value:%d|g\n", c.Prefix, name, metric.Value())
+			fmt.Fprintf(w, "%s--%s.value:%d|g\n", c.Prefix, name, m.Value())
 		case metrics.GaugeFloat64:
-			fmt.Fprintf(w, "%s--%s.value:%f|g\n", c.Prefix, name, metric.Value())
+			fmt.Fprintf(w, "%s--%s.value:%f|g\n", c.Prefix, name, m.Value())
 		case metrics.Histogram:
-			h := metric.Snapshot()
+			h := m.Snapshot()
 			ps := h.Percentiles(c.Percentiles)
 			fmt.Fprintf(w, "%s--%s.count:%d|c\n", c.Prefix, name, h.Count())
 			fmt.Fprintf(w, "%s--%s.min:%d|g\n", c.Prefix, name, h.Min())
@@ -84,14 +85,14 @@ func statsd(c *StatsDConfig) error {
 				fmt.Fprintf(w, "%s--%s.%s-percentile:%.2f|g\n", c.Prefix, name, key, ps[psIdx])
 			}
 		case metrics.Meter:
-			m := metric.Snapshot()
-			fmt.Fprintf(w, "%s--%s.count:%d|c\n", c.Prefix, name, m.Count())
-			fmt.Fprintf(w, "%s--%s.one-minute:%.2f|g\n", c.Prefix, name, m.Rate1())
-			fmt.Fprintf(w, "%s--%s.five-minute:%.2f|g\n", c.Prefix, name, m.Rate5())
-			fmt.Fprintf(w, "%s--%s.fifteen-minute:%.2f|g\n", c.Prefix, name, m.Rate15())
-			fmt.Fprintf(w, "%s--%s.mean:%.2f|g\n", c.Prefix, name, m.RateMean())
+			ss := m.Snapshot()
+			fmt.Fprintf(w, "%s--%s.count:%d|c\n", c.Prefix, name, ss.Count())
+			fmt.Fprintf(w, "%s--%s.one-minute:%.2f|g\n", c.Prefix, name, ss.Rate1())
+			fmt.Fprintf(w, "%s--%s.five-minute:%.2f|g\n", c.Prefix, name, ss.Rate5())
+			fmt.Fprintf(w, "%s--%s.fifteen-minute:%.2f|g\n", c.Prefix, name, ss.Rate15())
+			fmt.Fprintf(w, "%s--%s.mean:%.2f|g\n", c.Prefix, name, ss.RateMean())
 		case metrics.Timer:
-			t := metric.Snapshot()
+			t := m.Snapshot()
 			ps := t.Percentiles(c.Percentiles)
 			fmt.Fprintf(w, "%s--%s.count:%d|c\n", c.Prefix, name, t.Count())
 			fmt.Fprintf(w, "%s--%s.min:%d|g\n", c.Prefix, name, t.Min()/int64(du))
@@ -107,7 +108,7 @@ func statsd(c *StatsDConfig) error {
 			fmt.Fprintf(w, "%s--%s.fifteen-minute:%.2f|g\n", c.Prefix, name, t.Rate15())
 			fmt.Fprintf(w, "%s--%s.mean-rate:%.2f|g\n", c.Prefix, name, t.RateMean())
 		default:
-			log.Printf("[WARN] skipping metric type %s", metric)
+			log.Println("[WARN] No Metric", c.Prefix, name, reflect.TypeOf(m))
 		}
 		w.Flush()
 	})
